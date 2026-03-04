@@ -10,16 +10,17 @@ import (
 
 // mockOrchestrator records calls for testing
 type mockOrchestrator struct {
-	calls       []string
-	execOutput  string
-	execErr     error
-	copyToErr   error
-	startErr    error
-	stopErr     error
+	calls           []string
+	execOutput      string
+	execErr         error
+	copyToErr       error
+	startErr        error
+	stopErr         error
+	checkRunningErr error
 }
 
-func (m *mockOrchestrator) CheckDependencies() error                              { return nil }
-func (m *mockOrchestrator) WriteStackFiles(installPath string) error               { return nil }
+func (m *mockOrchestrator) CheckDependencies() error                 { return nil }
+func (m *mockOrchestrator) WriteStackFiles(installPath string) error { return nil }
 func (m *mockOrchestrator) UpdateStackFiles(installPath string, dryRun bool) (bool, error) {
 	return false, nil
 }
@@ -52,7 +53,8 @@ func (m *mockOrchestrator) ExecStreaming(installPath, service, command string) e
 }
 
 func (m *mockOrchestrator) CheckRunningStatus(instance config.Installation) error {
-	return nil
+	m.calls = append(m.calls, "CheckRunningStatus")
+	return m.checkRunningErr
 }
 
 func (m *mockOrchestrator) CopyFrom(installPath, service, containerPath, hostPath string) error {
@@ -96,9 +98,9 @@ func (m *mockOrchestrator) ListServices(instance config.Installation) ([]string,
 func (m *mockOrchestrator) ExecInteractive(instance config.Installation, service string, command []string) error {
 	return nil
 }
-func (m *mockOrchestrator) Name() string              { return "Mock" }
-func (m *mockOrchestrator) SupportsDevMode() bool     { return true }
-func (m *mockOrchestrator) SupportsImagePull() bool   { return true }
+func (m *mockOrchestrator) Name() string            { return "Mock" }
+func (m *mockOrchestrator) SupportsDevMode() bool   { return true }
+func (m *mockOrchestrator) SupportsImagePull() bool { return true }
 
 func TestNew(t *testing.T) {
 	tests := []struct {
@@ -352,5 +354,41 @@ func TestRunBackupError(t *testing.T) {
 	}
 	if len(mock.calls) != 1 {
 		t.Fatalf("expected 1 call, got %d", len(mock.calls))
+	}
+}
+
+func TestEnsureRunningAlreadyRunning(t *testing.T) {
+	mock := &mockOrchestrator{checkRunningErr: nil}
+	instance := config.Installation{Id: "test", Path: "/tmp/test"}
+
+	err := EnsureRunning(mock, instance)
+	if err != nil {
+		t.Fatalf("EnsureRunning() error = %v", err)
+	}
+
+	for _, call := range mock.calls {
+		if call == "Start" {
+			t.Error("Start should not be called when CheckRunningStatus returns nil (already running)")
+		}
+	}
+}
+
+func TestEnsureRunningNotRunning(t *testing.T) {
+	mock := &mockOrchestrator{checkRunningErr: fmt.Errorf("not running")}
+	instance := config.Installation{Id: "test", Path: "/tmp/test"}
+
+	err := EnsureRunning(mock, instance)
+	if err != nil {
+		t.Fatalf("EnsureRunning() error = %v", err)
+	}
+
+	hasStartCall := false
+	for _, call := range mock.calls {
+		if call == "Start" {
+			hasStartCall = true
+		}
+	}
+	if !hasStartCall {
+		t.Error("Start should be called when CheckRunningStatus returns an error (not running)")
 	}
 }
